@@ -1,0 +1,77 @@
+x-logging: &logging
+  logging:
+    driver: 'json-file'
+    options:
+      max-file: '10'
+      max-size: '100m'
+
+networks:
+  stateless-net:
+    name: stateless-net
+
+volumes:
+  nginx-volume:
+
+secrets:
+  certificate:
+    file: .secret/stateless.crt
+  private_key:
+    file: .secret/stateless.key
+
+services:
+  ngrok:
+    init: true
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    command: ["http", "--domain=${NGROK_DOMAIN}", "https://nginx:8443"]
+    ports:
+      - 4040:4040
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    platform: linux/amd64
+    restart: unless-stopped
+    networks:
+      - stateless-net
+    <<: *logging
+
+  nginx:
+    init: true
+    build:
+      context: .
+      dockerfile: ./nginx/Dockerfile
+    container_name: nginx
+    ports:
+      - 8443:443
+    depends_on:
+      application:
+        condition: service_started
+    # volumes:
+    #   - ${PWD}/nginx/nginx.conf:/etc/nginx/conf.d/nginx.conf:ro
+    #   - ${PWD}/application/dist:/usr/share/nginx/html:ro
+    environment:
+      - SERVER_DOMAIN=${SERVER_DOMAIN}
+    platform: linux/amd64
+    restart: unless-stopped
+    secrets:
+      - certificate
+      - private_key
+    networks:
+      - stateless-net
+    <<: *logging
+
+  application:
+    init: true
+    build:
+      context: ./application
+      dockerfile: Dockerfile
+    volumes:
+      - ${PWD}/application:/usr/src/app
+    # environment:
+    platform: linux/amd64
+    restart: unless-stopped
+    networks:
+      - stateless-net
+    # deploy:
+    #   replicas: 3
+    #   restart_policy:
+    #     condition: on-failure
